@@ -1,0 +1,148 @@
+
+//Первое задание Создать пустой проект: простой обход графа в глубину, написанный на языке C# в Visual Studio 2022.
+
+using System;
+using System.ComponentModel.DataAnnotations;
+
+public class Program
+{
+    public static void Main(string[] args)
+    {
+        Constant constantBlock_1 = new Constant(5f);
+        Constant constantBlock_2 = new Constant(3f);
+        Adder AdderBlock =new Adder();
+        EntryPoint EntryPointBlock = new EntryPoint();
+        Printer PrinterBlock = new Printer();
+
+        Link Link_EntryToAdder = new Link(EntryPointBlock.Exit,AdderBlock.Enter);
+        Link Link_Constant1ToAdder = new Link(constantBlock_1.Output, AdderBlock.Input_1);
+        Link Link_Constant2ToAdder = new Link(constantBlock_2.Output, AdderBlock.Input_2);
+        Link Link_AdderToPrinter = new Link(AdderBlock.Exit, PrinterBlock.Enter);
+        Link Link_AdderValueToPrinter = new Link(AdderBlock.Output, PrinterBlock.Input);
+        //Link Link_PrinterToEnd = new Link(PrinterBlock.Exit, null);
+
+        AdderBlock.Input_1.Sources.Add(Link_Constant1ToAdder);
+        AdderBlock.Input_2.Sources.Add(Link_Constant2ToAdder);
+        EntryPointBlock.Exit.Targets.Add(Link_EntryToAdder);
+        AdderBlock.Exit.Targets.Add(Link_AdderToPrinter);
+        PrinterBlock.Input.Sources.Add(Link_AdderValueToPrinter);
+        //PrinterBlock.Exit.Targets.Add(Link_PrinterToEnd);
+
+        EntryPointBlock.Run();
+    }
+}
+
+public class Link
+{
+    public InputSlot Input { get; set; }
+    public OutputSlot Output { get; set; }
+
+    public Link(OutputSlot output,InputSlot input)
+    {
+        Input = input;
+        Output = output;
+    }
+}
+public class InputSlot
+{
+    public Block block { get; set; }
+    public List<Link> Sources { get; } = new List<Link>();
+    public InputSlot(Block block) { this.block = block; }
+}
+public class OutputSlot
+{
+    public float Value { get; set; }
+    public Block block { get; set; }
+    public List<Link> Targets { get; } = new List<Link>();
+    public OutputSlot(Block block) { this.block = block; }
+}
+public abstract class Block
+{
+    //public List<Link> OutputLinks { get; }=new List<Link>();
+    public abstract void Run();
+}
+
+public class Constant : Block
+{
+    public float Value { get; set; }
+    public OutputSlot Output { get; set; }  
+    public Constant(float value)
+    {
+        Value = value;
+        Output = new OutputSlot(this);
+        Output.Value = Value;
+    }
+    public override void Run() {}
+}
+public class Adder:Block
+{
+    public InputSlot Enter { get; set; }
+    public OutputSlot Exit { get; set; }
+    public InputSlot Input_1 { get; set; }
+    public InputSlot Input_2 { get; set; }
+    public OutputSlot Output { get; set; }
+    public Adder()
+    {
+        Input_1 = new InputSlot(this);
+        Input_2 = new InputSlot(this);
+        Output = new OutputSlot(this);
+        Enter = new InputSlot(this);
+        Exit = new OutputSlot(this);
+    }
+    private float Sum(float A, float B)
+    {
+        return A + B;
+    }
+    public override void Run() 
+    {
+        Output.Value = Sum(Input_1.Sources[0].Output.Value, Input_2.Sources[0].Output.Value);
+        foreach(Link link in Exit.Targets)
+        {
+            if (Exit != new OutputSlot(this))
+                link.Input.block.Run();
+        }
+    }
+}
+public class Printer : Block
+{
+    public InputSlot Enter { get; set; }
+    public OutputSlot Exit { get; set; }
+    public InputSlot Input { get; set; }   
+    public OutputSlot Output { get; set; }
+    public Printer()
+    {
+        Input = new InputSlot(this);
+        Output = new OutputSlot(this);
+        Enter = new InputSlot(this);
+        Exit = new OutputSlot(this);
+    }
+    private void Print(float Num)
+    {
+        Console.WriteLine(Num);
+    }
+    public override void Run()
+    {
+        Print(Input.Sources[0].Output.Value);
+        foreach (Link link in Exit.Targets)
+        {
+            if(Exit!= new OutputSlot(this))
+                link.Input.block.Run();
+        }
+    }
+}
+public class EntryPoint : Block 
+{
+    public OutputSlot Exit { get; set; }
+    public EntryPoint()
+    {
+        Exit = new OutputSlot(this);
+    }
+    public override void Run()
+    {
+        foreach(Link link in Exit.Targets)
+        {
+            if (Exit != new OutputSlot(this))
+                link.Input.block.Run();
+        }
+    }
+}
