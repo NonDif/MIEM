@@ -1,0 +1,66 @@
+//Вступительное задание 3 Дана двумерная бинарная сетка размером m x n, представляющая карту из '1' (земля) и '0' (вода). Верните количество островов. 
+
+
+using System;
+
+public class Program
+{
+    public static void Main(string[] args)
+    {
+        /*List<List<string>> Grid =
+        [
+            new List<string> { "1", "1", "1", "1", "0" },
+            new List<string> { "1", "1", "0", "1", "0" },
+            new List<string> { "1", "1", "0", "0", "0" },
+            new List<string> { "0", "0", "0", "0", "0" },
+        ];*/
+
+        List<List<string>> Grid =
+        [
+            new List<string> { "1", "1", "0", "0", "1" },
+            new List<string> { "1", "1", "0", "0", "0" },
+            new List<string> { "0", "0", "1", "0", "0" },
+            new List<string> { "1", "0", "0", "1", "1" },
+        ];
+
+        int IslandCount = 0;
+
+        for(int i=0;i<Grid.Count;i++)
+        {
+            for(int j = 0; j < Grid[i].Count;j++)
+            {
+                if (Grid[i][j] == "1")
+                {
+                    ChangeGrid(i, j, Grid);
+                    IslandCount++;
+                    //DisplayMap(Grid);
+                }
+            }
+        }
+
+        
+        Console.WriteLine(IslandCount);
+    }
+    public static void ChangeGrid(int X, int Y, List<List<string>> Grid)
+    {
+        if (X>=0 && X<Grid.Count && Y>=0 && Y < Grid[0].Count && Grid[X][Y]=="1")
+        {
+            Grid[X][Y] = "0";
+            ChangeGrid(X-1, Y, Grid);
+            ChangeGrid(X, Y-1, Grid);
+            ChangeGrid(X, Y+1, Grid);
+            ChangeGrid(X+1, Y, Grid);
+        }
+    }
+    public static void DisplayMap(List<List<string>> Grid)
+    {
+        for(int i=0;i<Grid.Count;i++)
+        {
+            for(int j = 0; j < Grid[i].Count;j++)
+            {
+                Console.Write(Grid[i][j]);
+            }
+            Console.WriteLine();
+        }
+    }
+}
