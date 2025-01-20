@@ -1,0 +1,594 @@
+token = '***'
+
+# !pip install gigachat
+# !pip install langchain-gigachat langchain-community
+# !pip install aiogram
+# !pip install nest_asyncio
+# import nest_asyncio
+# nest_asyncio.apply()
+# !pip install aiogram aiosqlite apscheduler
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram import Router, F
+from aiogram.filters import CommandStart, Command, CommandObject
+from aiogram.types import Message
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, KeyboardButtonPollType
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import BotCommand, BotCommandScopeDefault
+from aiogram.types import CallbackQuery
+from aiogram.utils.chat_action import ChatActionSender
+from aiogram.types import ReplyKeyboardRemove
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from typing import Any, Awaitable, Callable, Dict
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject
+from html import escape
+import asyncio
+import logging
+import aiosqlite
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime
+
+#Определим состояния:
+class Form(StatesGroup):
+    name = State()
+    age = State()
+    gender = State()
+    diabet_type = State()
+    like_food = State()
+    sugar = State()
+
+#Включаем логирование
+logging.basicConfig(force=True, level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher(storage=MemoryStorage())
+
+#listuser = {}
+
+@dp.message(CommandStart(), State(None))
+async def cmd_start(message: Message, state: FSMContext):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await cursor.execute("INSERT INTO users (id, name, age, gender, diabet, likefood,statusrem, note, chatgpt) VALUES(?,?,?,?,?,?,?,?,?);", (message.from_user.id, "", 0, "", "", "", True,"",""))
+          await db.commit()
+          await message.answer(f'Привет, {message.from_user.first_name}! Вы зарегистрированы!')
+          await message.answer('Перед тем как начать пользоваться ботом, нужно составить небольшую анкету о Вас 😉')
+          await message.answer('✍️ Введите ваше имя:')
+          await state.set_state(Form.name)
+        else:
+          await message.answer(f'Привет, {message.from_user.first_name}! Вы уже зарегистрированы!')
+          #Запуск анкеты
+
+@dp.message(F.text, Form.name)
+async def input_fio(message: Message, state: FSMContext):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    if message.text.isdigit() or len(message.text.split())!=1 or not( 1<=len(message.text)<=30) or message.text[0]=='/':
+      await message.answer('❌ Вы ввели что-то непонятное, попробуйте еще раз... Имя должно содержать только одно слово и быть менее 30 символов!')
+      return
+    await message.answer(f'Отлично, {message.text}! 👍')
+
+    async with aiosqlite.connect("users.db") as db:
+      await db.execute(f"UPDATE users SET name = ? WHERE id = ?", (message.text, message.from_user.id))
+      await db.commit()
+    await state.update_data(PersonName=message.text)
+    data = await state.get_data()
+#    listuser[message.from_user.id] = {}
+#    listuser[message.from_user.id]["Name"] = data['PersonName']
+    await message.answer('✍️ Теперь напишите свой возраст:')
+    await state.set_state(Form.age)
+
+@dp.message(F.text,Form.age)
+async def input_age(message: Message, state: FSMContext):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    if not message.text.isdigit() or not ( 12<=int(message.text)<=120) or len(message.text.split())!=1:
+        await message.answer('❌ Похоже, что вы ввели не возраст или ваш возраст не в рамках от 12 до 120')
+        return
+
+    async with aiosqlite.connect("users.db") as db:
+      await db.execute(f"UPDATE users SET age = ? WHERE id = ?", (message.text, message.from_user.id))
+      await db.commit()
+    await state.update_data(Age=message.text)
+    data = await state.get_data()
+#    listuser[message.from_user.id]["Age"] = data['Age']
+    builder = InlineKeyboardBuilder()
+    builder.button(text='Женский 🙎‍♀️', callback_data='girl')
+    builder.button(text='Мужской 🙋‍♂️', callback_data='man')
+    builder.adjust(2)
+    await message.answer('✍️ Теперь выберите свой пол:', reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.in_(['girl','man']))
+async def pick_gender(call: CallbackQuery, state: FSMContext):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    if call.data == 'girl':
+       data = 'женский'
+    if call.data == 'man':
+       data = 'мужской'
+
+    async with aiosqlite.connect("users.db") as db:
+      await db.execute(f"UPDATE users SET gender = ? WHERE id = ?", (data, call.from_user.id))
+      await db.commit()
+#    listuser[call.from_user.id]["Gender"] = data
+    await call.message.answer(f'Ваш выбор зафиксирован, вы выбрали {data} пол 👀')
+    await call.message.delete()
+    builder = InlineKeyboardBuilder()
+    builder.button(text='Диабет 1-го типа', callback_data='Diabet_type1')
+    builder.button(text='Диабет 2-го типа', callback_data='Diabet_type2')
+    builder.button(text='Гестационный диабет', callback_data='Diabet_type3')
+    builder.adjust(3)
+    await call.message.answer('👌 Осталось совсем немного! Сейчас нужно зафиксировать тип вашего диабета:', reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data.in_(['Diabet_type1','Diabet_type2','Diabet_type3']))
+async def diabet_type(call: CallbackQuery, state: FSMContext):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    if call.data == 'Diabet_type1':
+      data = '1-й'
+    if call.data == 'Diabet_type2':
+      data = '2-й'
+    if call.data == 'Diabet_type3':
+      data = 'гестационный'
+
+    async with aiosqlite.connect("users.db") as db:
+      await db.execute(f"UPDATE users SET diabet = ? WHERE id = ?", (data, call.from_user.id))
+      await db.commit()
+#    listuser[call.from_user.id]["Diabet"] = data
+    await call.message.answer(f'Ваш выбор зафиксирован, у вас {data} тип диабета 👀')
+    await call.message.delete()
+    await call.message.answer('☝️ Последний шаг, необходимо написать любимые блюда.\n\nПопробуйте описать свой предпочитемый рацион максимально разнообразным. Это нужно, чтобы бот мог на основании ваших предпочтений создавать план питания на день.\n\nПожалуйста, перечисляйте названия блюд через запятую.\n\nНапример: каша, гречка с молоком, яичница')
+    await state.set_state(Form.like_food)
+
+@dp.message(F.text,Form.like_food)
+async def input_like_food(message: Message, state: FSMContext):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    if not (len(message.text.split(','))>=2):
+      await message.answer('❌ Попробуйте написать как минимум 2 блюда')
+      return
+    data = await state.get_data()
+#    name = data['PersonName']
+    await message.answer(f'На этом анкета завершена, спасибо за уделённое время!\n\nТеперь вам открыта возможность разговаривать с ботом, вы можете как задавать вопросы, так и воспользоваться прочим функционалом через /menu.\n\nУдачного использования! 🌟')
+    data = message.text
+
+    async with aiosqlite.connect("users.db") as db:
+      await db.execute(f"UPDATE users SET likefood = ? WHERE id = ?", (data, message.from_user.id))
+      await db.commit()
+#    listuser[message.from_user.id]["LikeFood"] = data
+    await state.clear()
+
+@dp.message(Command("help"), State(None))
+async def help(message: Message):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    await message.answer('Это — ИИ-бот для помощи больным диабетом. У бота есть множество функций, которые вам обязательно будут полезны! Чтобы начать взаимодействие с ботом, нажмите /menu')
+
+@dp.message(Command("menu"), State(None))
+async def menu(message: Message):
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    await message.answer(menu_starttext, reply_markup=menu)
+
+menu_starttext = "📍 Я — ассистент-диабетолог с искуственным интеллектом! Чем я могу вам помочь?\n\nВы можете выбрать одну из команд ниже или просто задать вопрос в чате, спрашивайте всё, что вас интересует!"
+menu_buttons = [
+    [InlineKeyboardButton(text="Дать совет по диабету 📚", callback_data="advice")],
+    [InlineKeyboardButton(text="Составить план питания 🥦", callback_data="plan")],
+    [InlineKeyboardButton(text="Дневник записей 📔", callback_data="note")],
+    [InlineKeyboardButton(text="Мои данные 👤", callback_data="account"),
+    InlineKeyboardButton(text="Перепройти анкету 📊", callback_data="form")],
+    [InlineKeyboardButton(text="Проверить уведомления 🔔", callback_data="push")]
+]
+menu = InlineKeyboardMarkup(inline_keyboard=menu_buttons)
+
+@dp.callback_query(F.data=="push", State(None))
+async def status_push(call: CallbackQuery, state: FSMContext):
+  async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+  builder = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="Включить🔔", callback_data="on")],
+      [InlineKeyboardButton(text="Выключить🔕", callback_data="off")],
+      [InlineKeyboardButton(text="Назад в меню↩️", callback_data="menu")]
+    ])
+  async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is not None:
+          await cursor.execute("SELECT statusrem FROM users WHERE id = ?", (call.from_user.id,))
+          statuspush = await cursor.fetchone()
+
+          if statuspush[0]==1:
+            await call.message.answer('📍 Ваш текущий статус: "Уведомления включены" \nВыберите действие',reply_markup = builder)
+          if statuspush[0]==0:
+            await call.message.answer('📍 Ваш текущий статус: "Уведомления выключены" \nВыберите действие',reply_markup = builder)
+
+async def send_msg(dp):
+  async with aiosqlite.connect('users.db') as db:
+    async with db.execute("SELECT * FROM users WHERE statusrem=1") as cursor:
+      async for row in cursor:
+        await bot.send_message(chat_id=row[0], text='Не забывайте проверять уровень сахара в крови')
+
+
+
+
+@dp.callback_query(F.data=="on", State(None))
+async def open_note(call: CallbackQuery, state: FSMContext):
+  async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+        await db.execute("UPDATE users SET statusrem = 1 WHERE id = ?", (call.from_user.id, ))
+        await db.commit()
+        await call.message.answer('Уведомления активированы!🔔')
+
+@dp.callback_query(F.data=="off", State(None))
+async def open_note(call: CallbackQuery, state: FSMContext):
+  async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+        await db.execute("UPDATE users SET statusrem = 0 WHERE id = ?", (call.from_user.id, ))
+        await db.commit()
+        await call.message.answer('Уведомления деактивированы!🔕')
+
+@dp.callback_query(F.data=="note", State(None))
+async def open_note(call: CallbackQuery, state: FSMContext):
+  async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+  builder = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="Сделать новую запись ✏️", callback_data="record")],
+      [InlineKeyboardButton(text="Показать предыдущие записи 📝", callback_data="showall")],
+      [InlineKeyboardButton(text="Назад в меню ↩️", callback_data="menu")]
+    ])
+  await call.message.answer('📍 Выберите действие:',reply_markup = builder)
+
+@dp.callback_query(F.data=="record", State(None))
+async def create_daynote(call: CallbackQuery, state: FSMContext):
+  async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+  await call.message.answer('Введите значения уровня сахара в единицах (ммоль/л):')
+  await state.set_state(Form.sugar)
+
+def isfloat(num):
+    try:
+        float(num)
+        return True
+    except ValueError:
+        return False
+
+@dp.message(F.text,Form.sugar)
+async def input_sugar(message: Message, state: FSMContext):
+   async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    if not isfloat(message.text) or not ( 2.0<=float(message.text)<=30.0) or len(message.text.split())!=1:
+        await message.answer('❌ Похоже, что вы ввели совсем не уровень сахара, или он не в рамках от 2.0 до 30.0 ммоль/л')
+        return
+    await state.update_data(Sugar=message.text)
+    data = str(message.text)
+#    data = await state.get_data()
+#    if message.from_user.id in listuser:
+#      if not "Notes" in listuser[message.from_user.id]:
+#        listuser[message.from_user.id]["Notes"]=[]
+    data = "🕰️ Время: " + str(datetime.now().strftime('%Y-%m-%d %H:%M:%S')) + ", 📌 Уровень: " + str(data) + " ммоль/л\n"
+
+    async with aiosqlite.connect("users.db") as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        await cursor.execute("SELECT note FROM users WHERE id = ?", (message.from_user.id,))
+        row = await cursor.fetchone()
+        if row:
+          note = row[0]
+      note += str(data)
+      print(note)
+      await db.execute(f"UPDATE users SET note = ? WHERE id = ?", (note, message.from_user.id))
+      await db.commit()
+#    listuser[message.from_user.id]["Notes"].append([datetime.now().strftime('%Y-%m-%d %H:%M:%S'),data['Sugar']])
+    await state.clear()
+    builder = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="Сделать новую запись ✏️", callback_data="record")],
+      [InlineKeyboardButton(text="Показать предыдущие записи 📝", callback_data="showall")],
+      [InlineKeyboardButton(text="Назад в меню ↩️", callback_data="menu")]
+    ])
+    await message.answer('🤙 Запись сделана, выберите дальнейшее действие:', reply_markup = builder)
+
+@dp.callback_query(F.data=="showall", State(None))
+async def create_newnote(call: CallbackQuery, state: FSMContext):
+  async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+  builder = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="Назад в меню ↩️", callback_data="menu")]
+    ])
+#  allnotes=""
+#  for note in listuser[call.from_user.id]["Notes"]:
+#      allnotes += f"🕰️ Время: {note[0]}, 📌 Уровень: {note[1]} (ммоль/л)\n"
+
+  async with aiosqlite.connect("users.db") as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        await cursor.execute("SELECT note FROM users WHERE id = ?", (call.from_user.id,))
+        row = await cursor.fetchone()
+        if row:
+          note = row[0]
+  await call.message.answer('Вот все ваши записи:\n' + note, reply_markup = builder)
+
+@dp.callback_query(F.data=="plan", State(None))
+async def create_plan(call: CallbackQuery, state: FSMContext):
+   async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    builder = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="Составить ещё один план 🥦", callback_data="plan")],
+      [InlineKeyboardButton(text="Назад в меню ↩️", callback_data="menu")]
+    ])
+
+    async with aiosqlite.connect("users.db") as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        await cursor.execute("SELECT id, diabet, likefood FROM users WHERE id = ?", (call.from_user.id,))
+        row = await cursor.fetchone()
+        if row:
+          id, diabet, likefood = row
+    if call.from_user.id == id:
+      messages.append(HumanMessage(content=f'Распиши план питания на день для пользователя, больного диабетом. Учитывай, что у него {diabet} тип диабета. Также учитывай его предпочтения в еде: {likefood}'))
+    else:
+      messages.append(HumanMessage(content='Распиши план питания на день для диабетика. Ты не знаешь его тип диабета, а также не знаешь его предпочтений в еде, поэтому пиши что-то общее, что понравится многим.'))
+    res = llm.invoke(messages)
+    messages.append(res)
+    await call.message.answer(res.content, reply_markup = builder)
+
+
+@dp.callback_query(F.data=="account", State(None))
+async def my_account(call: CallbackQuery, state: FSMContext):
+   async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    builder = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="Назад в меню ↩️", callback_data="menu")]
+    ])
+
+    async with aiosqlite.connect('users.db') as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is not None:
+          await cursor.execute("SELECT name, age, gender, diabet, likefood FROM users WHERE id = ?", (call.from_user.id,))
+          row = await cursor.fetchone()
+          if row:
+            name, age, gender, diabet, likefood = row
+          await call.message.answer(f'Ваша анкета:\n\n' + f'Ваше имя: {name}'+f'\nВаш возраст: {age}' + f'\nВаш гендер: {gender}' + f'\nТип диабета: {diabet}' + f'\nПредпочтения в еде: {likefood}', reply_markup = builder)
+        else:
+          await call.message.answer('Вы совсем не рассказали ничего о себе. Давайте это исправим!', reply_markup = builder)
+#    if call.from_user.id in listuser:
+#        await call.message.answer(f'Ваша анкета:\n\n'+f'Ваше Имя: {listuser[call.from_user.id]["Name"]}'+f'\nВаш возраст: {listuser[call.from_user.id]["Age"]}'+f'\nВаш гендер: {listuser[call.from_user.id]["Gender"]}'+f'\nСтепень диабета: {listuser[call.from_user.id]["Diabet"]}'+f'\nПредпочтения в еде: {listuser[call.from_user.id]["LikeFood"]}', reply_markup = builder)
+#    else:
+#        await call.message.answer('Вы еще не прошли анкету, ваших данных нет',reply_markup = builder)
+
+@dp.callback_query(F.data=="form", State(None))
+async def new_form(call: CallbackQuery, state: FSMContext):
+   async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+   await call.message.answer('Окей! Давайте перепишем предыдущую анкету')
+   await call.message.answer('✍️ Введите Ваше имя:')
+   await state.set_state(Form.name)
+
+@dp.callback_query(F.data=="advice", State(None))
+async def give_advice(call: CallbackQuery):
+   async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    builder = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="Еще один совет 📚", callback_data="advice")],
+      [InlineKeyboardButton(text="Назад в меню ↩️", callback_data="menu")]
+    ])
+
+    async with aiosqlite.connect("users.db") as db:
+      async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        await cursor.execute("SELECT age, gender, diabet FROM users WHERE id = ?", (call.from_user.id,))
+        row = await cursor.fetchone()
+        if row:
+          age, gender, diabet = row
+    messages.append(HumanMessage(content=f'Напиши совет для человека, страдающего диабетом. Учитывай, что человеку {age} лет, у него {diabet} тип диабета и у него {gender} пол. Не делай совет очень большим.'))
+    res = llm.invoke(messages)
+    messages.append(res)
+    await call.message.answer(res.content, reply_markup = builder)
+
+@dp.callback_query(F.data=="menu", State(None))
+async def return_menu(call: CallbackQuery):
+  async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (call.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await call.message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+    await call.message.answer(menu_starttext, reply_markup=menu)
+
+async def start_bot():
+    commands = [BotCommand(command='start', description='Начать взаимодействие с ботом'),
+                BotCommand(command='help', description='Помощь'),
+                BotCommand(command='menu', description='Открыть меню')]
+    await bot.set_my_commands(commands, BotCommandScopeDefault())
+
+async def start_db():
+    # Подключение к базе данных (если файл не существует, он будет создан)
+    async with aiosqlite.connect('users.db') as db:
+        # Создание таблицы, если она не существует
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER,
+                name STRING,
+                age INTEGER,
+                gender STRING,
+                diabet STRING,
+                likefood STRING,
+                statusrem INTEGER,
+                note STRING,
+                chatgpt STRING
+            )
+        ''')
+        await db.commit() # Сохранение изменений
+
+async def main(): #Основная асинхронная функция, которая будет запускаться при старте бота.
+    #await start_bot()
+    #dp.startup.register(start_db)
+    scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
+    
+    job = scheduler.add_job(send_msg, 'interval', seconds=30, args=(dp,))
+    
+    scheduler.start()
+    dp.startup.register(start_db)
+    try:
+      print("Бот запущен...")
+      await bot.delete_webhook(drop_pending_updates=True)
+      await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()) #апускаем бота в режиме опроса (polling). Бот начинает непрерывно запрашивать обновления с сервера Telegram и обрабатывать их
+    finally:
+      scheduler.remove_all_jobs()
+      await bot.session.close()
+      print("Бот остановлен")
+
+@dp.message()
+async def prtext(message: Message, state: FSMContext):
+  async with aiosqlite.connect("users.db") as db:
+    async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+        if await cursor.fetchone() is None:
+          await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
+          return
+        messages = messages_orig
+        async with db.execute("SELECT id FROM users WHERE id = ?", (message.from_user.id,)) as cursor:
+            await cursor.execute("SELECT chatgpt FROM users WHERE id = ?", (message.from_user.id,))
+            row = await cursor.fetchone()
+            if row:
+              local = row[0]
+              if len(local.split(';'))>0:
+                for i in local.split(';'):
+                  messages.append(i)
+        messages.append(HumanMessage(content=message.text))
+        res = llm.invoke(messages)
+        messages.append(res)
+        async with aiosqlite.connect("users.db") as db:
+          data = ""
+          for stroke in messages:
+            if isinstance(stroke, str):
+              data += stroke + ';'
+            elif isinstance(stroke, SystemMessage):
+              data += stroke.content
+            else:
+              data += stroke.content + ';'
+          await db.execute(f"UPDATE users SET chatgpt = ? WHERE id = ?", (data[:-1], message.from_user.id))
+          print(data[:-1])
+          await db.commit()
+        await message.answer(res.content)
+
+#Пример формирования диалога с GigaChat
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_gigachat.chat_models import GigaChat
+
+GigaChatKey = '***'
+
+#Получение токена
+import requests
+import uuid
+import json
+
+rq_uid = str(uuid.uuid4())
+#URL API, к которому мы обращаемся
+url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+
+#Данные для запроса
+payload=json.dumps({
+    "scope": 'GIGACHAT_API_PERS',
+    "model": "GigaChat",
+    "temperature": 0.5,
+    "top_p": 0.1, #Контроль разнообразия ответов
+    "n": 1, #Кол-во возвращаемых ответов
+    "stream": False, #Потоковая передача ответа
+    "max_tokens": 512, #Максимальное количество токенов в ответе
+    "repetition_penalty": 1, #Штраф за повторения
+    "update_interval": 0 #Интервал обновления (для потоковой передачи)
+})
+#Заголовки запроса
+headers = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Accept': 'application/json',
+    'RqUID': rq_uid,
+    'Authorization': f'Basic {GigaChatKey}'
+}
+
+response = requests.request("POST", url, headers=headers, data=payload, verify=False) # verify=False Отключает проверку наличия сертификатов НУЦ Минцифры
+#giga_token = response.json()['access_token']
+
+llm = GigaChat(
+    credentials=GigaChatKey,
+    scope="GIGACHAT_API_PERS",
+    model="GigaChat",
+    verify_ssl_certs=False, # Отключает проверку наличия сертификатов НУЦ Минцифрыffff
+    streaming=False,
+)
+
+messages=[]
+messages_orig = [
+    SystemMessage(
+        content="Ты — ассистент-диабетолог с искусственным интеллектом, созданный для помощи людям с диабетом. Твоя основная задача — предоставлять персонализированную и актуальную информацию, связанную с управлением этим заболеванием. Ты можешь отвечать на вопросы о типах диабета, его симптомах, методах лечения и способах контроля уровня сахара в крови. Также ты можешь помочь составить диетический план на день, учитывая предоставленные данные, такие как возраст, пол, тип диабета, уровень физической активности, предпочтения в питании и наличие аллергий. Твои рекомендации включают советы по выбору продуктов, балансировке макроэлементов и полезным привычкам, которые помогают поддерживать здоровье. Ты узкоспециализирован и отвечаешь только на вопросы, связанные с диабетом, вежливо отклоняя любые запросы, не относящиеся к своей теме. Ты стараешься объяснять сложные медицинские концепции простым и понятным языком. Имей в виду, что ты не заменяешь профессиональную медицинскую консультацию, но всегда готов помочь лучше контролировать диабет и улучшить качество жизни"
+    )
+]
+
+await main()
+#asyncio.run(main())
+
+# while(True):
+#     user_input = input("Пользователь: ")
+#     if user_input == "пока":
+#       break
+#     messages.append(HumanMessage(content=user_input))
+#     res = llm.invoke(messages)
+#     messages.append(res)
+#     print("GigaChat: ", res.content)
